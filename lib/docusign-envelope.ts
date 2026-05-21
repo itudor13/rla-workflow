@@ -1,19 +1,16 @@
 import type { ListingFields } from "./fields";
 
-const SMARTY_PREFIX =
-  "com.docusign.extensibilityplatform.action.verify.postaladdress@1.0.0.VerifyPostalAddressInput";
-
 type TextTab = { tabLabel: string; value: string };
 
-function smartyTabs(fields: ListingFields, index: 0 | 1): TextTab[] {
-  return [
-    { tabLabel: `${SMARTY_PREFIX}[${index}].street1`, value: fields.PropertyAddress },
-    { tabLabel: `${SMARTY_PREFIX}[${index}].locality`, value: fields.City },
-    { tabLabel: `${SMARTY_PREFIX}[${index}].subdivision`, value: "CA" },
-    { tabLabel: `${SMARTY_PREFIX}[${index}].postalCode`, value: fields.ZipCode },
-  ];
-}
-
+// IMPORTANT: only send tabLabels that EXACTLY match tabs that exist in the
+// DocuSign template. Sending labels that don't exist (e.g. positionless tabs)
+// causes DocuSign to drop the recipient's entire tab set, leaving a blank doc.
+//
+// The CAR RLA template (7df819db-…) defines these Seller text tabs. The address
+// fields (PropertyAddress/City/State/ZipCode) are repeated on pages 1–3 with the
+// SAME label, so a single value auto-fills every page. There is no template tab
+// for OwnerName1 (the seller name auto-fills from the recipient name via a
+// fullName tab), nor for ListingStartDate / ListingTermDays.
 export function buildEnvelopePayload(
   fields: ListingFields,
   status: "sent" | "created" = "created"
@@ -21,20 +18,16 @@ export function buildEnvelopePayload(
   const textTabs: TextTab[] = [
     { tabLabel: "PropertyAddress", value: fields.PropertyAddress },
     { tabLabel: "City", value: fields.City },
-    { tabLabel: "County", value: fields.County },
+    { tabLabel: "State", value: "CA" },
     { tabLabel: "ZipCode", value: fields.ZipCode },
+    { tabLabel: "County", value: fields.County },
     { tabLabel: "APN", value: fields.APN },
-    { tabLabel: "OwnerName1", value: fields.OwnerName1 },
     { tabLabel: "SellerPhone", value: fields.SellerPhone.replace(/\D/g, "") },
     { tabLabel: "ListPrice", value: fields.ListPrice.replace(/[^\d.]/g, "") },
-    { tabLabel: "ListingStartDate", value: fields.ListingStartDate },
-    { tabLabel: "ListingTermDays", value: fields.ListingTermDays },
     { tabLabel: "ListingEndDate", value: fields.ListingEndDate },
     { tabLabel: "CommissionBuySide", value: fields.CommissionBuySide },
     { tabLabel: "CommissionSellSide", value: fields.CommissionSellSide },
     { tabLabel: "SpecialTerms", value: fields.SpecialTerms },
-    ...smartyTabs(fields, 0),
-    ...smartyTabs(fields, 1),
   ].filter((t) => t.value && t.value.trim() !== "");
 
   const templateId = process.env.DOCUSIGN_TEMPLATE_ID;
@@ -50,19 +43,19 @@ export function buildEnvelopePayload(
 
   return {
     templateId,
+    // Don't override routingOrder — the template already routes Seller before
+    // Agent. Overriding it previously produced a duplicate Agent recipient.
     templateRoles: [
       {
         roleName: "Seller",
         name: fields.OwnerName1,
         email: fields.OwnerEmail,
-        routingOrder: "1",
         tabs: { textTabs },
       },
       {
         roleName: "Agent",
         name: agentName,
         email: agentEmail,
-        routingOrder: "2",
       },
     ],
     status,
