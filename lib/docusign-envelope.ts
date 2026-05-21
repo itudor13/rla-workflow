@@ -1,5 +1,4 @@
 import type { ListingFields } from "./fields";
-import type { Agent } from "./agents";
 
 type TextTab = { tabLabel: string; value: string };
 
@@ -14,8 +13,7 @@ type TextTab = { tabLabel: string; value: string };
 // no template tab for ListingTermDays (we only print the start/end dates).
 export function buildEnvelopePayload(
   fields: ListingFields,
-  status: "sent" | "created" = "created",
-  agent?: Agent
+  status: "sent" | "created" = "created"
 ) {
   const textTabs: TextTab[] = [
     { tabLabel: "PropertyAddress", value: fields.PropertyAddress },
@@ -35,10 +33,6 @@ export function buildEnvelopePayload(
 
   const templateId = process.env.DOCUSIGN_TEMPLATE_ID;
   // Prefer the agent chosen in the app; fall back to env defaults.
-  const agentName = agent?.name || process.env.AGENT_NAME || "Ian Tudor";
-  const agentEmail =
-    agent?.email || process.env.AGENT_EMAIL || "ian.b.tudor@gmail.com";
-
   const subjectAddr = [
     fields.PropertyAddress,
     fields.City && `${fields.City}, CA ${fields.ZipCode}`.trim(),
@@ -46,21 +40,17 @@ export function buildEnvelopePayload(
     .filter(Boolean)
     .join(", ");
 
+  // Only fill the Seller role here. The template's Agent recipient is updated
+  // in place after creation (see /api/send) so the chosen agent REPLACES the
+  // template's default agent instead of being added as a duplicate.
   return {
     templateId,
-    // Don't override routingOrder — the template already routes Seller before
-    // Agent. Overriding it previously produced a duplicate Agent recipient.
     templateRoles: [
       {
         roleName: "Seller",
         name: fields.OwnerName1,
         email: fields.OwnerEmail,
         tabs: { textTabs },
-      },
-      {
-        roleName: "Agent",
-        name: agentName,
-        email: agentEmail,
       },
     ],
     status,

@@ -290,7 +290,9 @@ function ReviewField({
 
 // ── Main App ────────────────────────────────────────────
 export default function App() {
-  const [screen, setScreen] = useState<"start" | "freeform" | "form" | "review" | "done">("start");
+  const [screen, setScreen] = useState<
+    "start" | "freeform" | "form" | "review" | "confirm" | "done"
+  >("start");
   const [inputMode, setInputMode] = useState<"free" | "form" | null>(null);
   const [freeText, setFreeText] = useState("");
   const [fields, setFields] = useState<ListingFields>(emptyFields());
@@ -305,21 +307,20 @@ export default function App() {
     email?: string;
   } | null>(null);
 
-  // Handle the redirect back from DocuSign's "Review & Send" screen.
+  // Handle the redirect back from DocuSign's document preview. Restore the
+  // listing (state was lost on the redirect) and show the confirm screen.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("ds_return") !== "1") return;
-    const event = (params.get("event") || "").toLowerCase();
-    let stashed: { envelopeId?: string; address?: string; email?: string } = {};
     try {
-      stashed = JSON.parse(sessionStorage.getItem("rla_last_send") || "{}");
-      sessionStorage.removeItem("rla_last_send");
+      const stashed = JSON.parse(sessionStorage.getItem("rla_pending") || "{}");
+      if (stashed.fields) setFields(stashed.fields);
+      if (stashed.agentId) setSelectedAgentId(stashed.agentId);
+      if (stashed.envelopeId) setEnvelopeId(stashed.envelopeId);
+      setScreen(stashed.envelopeId ? "confirm" : "start");
     } catch {
-      /* ignore */
+      setScreen("start");
     }
-    setEnvelopeId(stashed.envelopeId || null);
-    setReturnInfo({ event, address: stashed.address, email: stashed.email });
-    setScreen("done");
     // Clean the URL so a refresh doesn't replay this state.
     window.history.replaceState({}, "", window.location.pathname);
   }, []);
@@ -391,7 +392,9 @@ export default function App() {
     }
   };
 
-  const sendEnvelope = async () => {
+  // Step 1: build the draft and open the mobile-friendly filled-document
+  // preview. Nothing is sent to the seller yet.
+  const previewEnvelope = async () => {
     setLoading(true);
     setError(null);
     try {
@@ -410,35 +413,79 @@ export default function App() {
           data.details?.message ||
           (typeof data.details === "string" ? data.details : "") ||
           data.error ||
-          "Send failed";
+          "Could not build the document";
         throw new Error(detail);
       }
-      // Stash the listing summary so we can show a confirmation when DocuSign
-      // redirects back after the agent reviews and sends.
+      // Persist the listing so we can restore it after the DocuSign redirect.
       try {
         sessionStorage.setItem(
-          "rla_last_send",
+          "rla_pending",
           JSON.stringify({
             envelopeId: data.envelopeId,
-            address: fields.PropertyAddress,
-            email: fields.OwnerEmail,
+            fields,
+            agentId: selectedAgentId,
           })
         );
       } catch {
         /* ignore storage errors */
       }
-      // Hand the agent off to DocuSign's "Review & Send" screen. Nothing is
-      // sent to the seller until the agent clicks Send there.
-      if (data.senderViewUrl) {
-        window.location.href = data.senderViewUrl;
+      if (data.previewUrl) {
+        window.location.href = data.previewUrl;
         return;
       }
-      // Fallback: no sender view (shouldn't happen) — just confirm the draft.
+      // Fallback: no preview URL — go straight to confirm.
       setEnvelopeId(data.envelopeId);
+      setScreen("confirm");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to build the document.");
+      setLoading(false);
+    }
+  };
+
+  // Step 2a: the agent reviewed the filled doc and approves — send to seller.
+  const finalizeSend = async () => {
+    if (!envelopeId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/finalize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ envelopeId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not send");
+      try {
+        sessionStorage.removeItem("rla_pending");
+      } catch {
+        /* ignore */
+      }
+      setReturnInfo({ event: "send", address: fields.PropertyAddress, email: fields.OwnerEmail });
       setScreen("done");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to send envelope.");
+      setError(e instanceof Error ? e.message : "Failed to send.");
+    } finally {
       setLoading(false);
+    }
+  };
+
+  // Step 2b: the agent spotted an error — discard the draft and go back to edit.
+  const backToEdit = async () => {
+    const id = envelopeId;
+    setEnvelopeId(null);
+    try {
+      sessionStorage.removeItem("rla_pending");
+    } catch {
+      /* ignore */
+    }
+    setScreen("review");
+    if (id) {
+      // Best-effort cleanup of the discarded draft.
+      fetch("/api/void", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ envelopeId: id }),
+      }).catch(() => {});
     }
   };
 
@@ -680,24 +727,58 @@ export default function App() {
               lineHeight: 1.4,
             }}
           >
-            Next you'll see the prefilled agreement in DocuSign to review.{" "}
+            Next you'll see the fully filled document to proof-read.{" "}
             <strong>Nothing is sent to {fields.OwnerEmail || "the seller"}</strong>{" "}
-            until you click Send on that review screen. Auto-reminders kick in after
-            2 days, then daily.
+            until you approve it on the next step. Auto-reminders kick in after 2
+            days, then daily.
           </div>
 
           <button
             style={S.primaryBtn(loading || !requiredFilled)}
             disabled={loading || !requiredFilled}
-            onClick={sendEnvelope}
+            onClick={previewEnvelope}
           >
-            {loading ? "Opening review screen..." : "Review in DocuSign"}
+            {loading ? "Building document..." : "Preview Document"}
           </button>
           <button
             style={S.secondaryBtn}
             onClick={() => setScreen(inputMode === "free" ? "freeform" : "form")}
           >
             ← Go Back & Edit
+          </button>
+        </>
+      )}
+
+      {/* ── Screen: Confirm (after previewing the filled document) ── */}
+      {screen === "confirm" && (
+        <>
+          <div style={S.card}>
+            <div
+              style={{
+                fontSize: 18,
+                fontFamily: "'DM Serif Display', serif",
+                color: "#2C2825",
+                marginBottom: 8,
+              }}
+            >
+              Did the document look right?
+            </div>
+            <div style={{ fontSize: 14, color: "#6B6560", lineHeight: 1.5 }}>
+              If everything in the preview was correct, send it to{" "}
+              <strong>{fields.OwnerEmail || "the seller"}</strong> for signature. If
+              you spotted an error, go back and fix it — nothing has been sent yet.
+            </div>
+          </div>
+
+          <button
+            style={S.primaryBtn(loading)}
+            disabled={loading}
+            onClick={finalizeSend}
+          >
+            {loading ? "Sending..." : "Looks good — Send to Seller"}
+          </button>
+          <button style={S.secondaryBtn} onClick={backToEdit} disabled={loading}>
+            ← I saw an error — Back & Edit
           </button>
         </>
       )}
