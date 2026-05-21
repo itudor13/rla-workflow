@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDocusignAccessToken } from "@/lib/docusign-auth";
 import { buildEnvelopePayload } from "@/lib/docusign-envelope";
 import type { ListingFields } from "@/lib/fields";
+import { getAgentById, DEFAULT_AGENT } from "@/lib/agents";
 
 export const runtime = "nodejs";
 
@@ -25,8 +26,10 @@ export async function POST(req: Request) {
     const body = (await req.json()) as {
       fields?: Partial<ListingFields>;
       returnUrl?: string;
+      agentId?: string;
     };
     const fields = body.fields;
+    const agent = getAgentById(body.agentId) || DEFAULT_AGENT;
     if (!fields) {
       return NextResponse.json({ error: "Missing fields" }, { status: 400 });
     }
@@ -53,7 +56,7 @@ export async function POST(req: Request) {
     const accessToken = await getDocusignAccessToken();
 
     // Create the envelope as a DRAFT so nothing is sent to the seller yet.
-    const payload = buildEnvelopePayload(fields as ListingFields, "created");
+    const payload = buildEnvelopePayload(fields as ListingFields, "created", agent);
 
     const res = await fetch(`${baseUrl}/accounts/${accountId}/envelopes`, {
       method: "POST",

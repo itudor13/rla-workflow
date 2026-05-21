@@ -9,6 +9,7 @@ import {
   type FieldDef,
   type ListingFields,
 } from "@/lib/fields";
+import { AGENTS, DEFAULT_AGENT } from "@/lib/agents";
 
 // ── Styles ──────────────────────────────────────────────
 const S = {
@@ -297,6 +298,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<keyof ListingFields | null>(null);
   const [envelopeId, setEnvelopeId] = useState<string | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(DEFAULT_AGENT.id);
   const [returnInfo, setReturnInfo] = useState<{
     event: string;
     address?: string;
@@ -396,7 +398,11 @@ export default function App() {
       const res = await fetch("/api/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fields, returnUrl: window.location.origin }),
+        body: JSON.stringify({
+          fields,
+          agentId: selectedAgentId,
+          returnUrl: window.location.origin,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -444,6 +450,8 @@ export default function App() {
     setError(null);
     setEnvelopeId(null);
     setEditingField(null);
+    setReturnInfo(null);
+    setSelectedAgentId(DEFAULT_AGENT.id);
   };
 
   const stepIndex =
@@ -639,6 +647,28 @@ export default function App() {
                 onBlur={() => setEditingField(null)}
               />
             ))}
+
+            {/* Listing agent (counter-signer) selector */}
+            <div style={{ ...S.reviewField, borderBottom: "none", paddingTop: 14 }}>
+              <span style={S.reviewLabel}>Listing Agent (counter-signs)</span>
+              <select
+                value={selectedAgentId}
+                onChange={(e) => setSelectedAgentId(e.target.value)}
+                style={{
+                  ...S.input(false, false),
+                  marginTop: 6,
+                  fontSize: 16,
+                  cursor: "pointer",
+                  appearance: "auto",
+                }}
+              >
+                {AGENTS.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.email})
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div

@@ -1,4 +1,5 @@
 import type { ListingFields } from "./fields";
+import type { Agent } from "./agents";
 
 type TextTab = { tabLabel: string; value: string };
 
@@ -13,7 +14,8 @@ type TextTab = { tabLabel: string; value: string };
 // fullName tab), nor for ListingStartDate / ListingTermDays.
 export function buildEnvelopePayload(
   fields: ListingFields,
-  status: "sent" | "created" = "created"
+  status: "sent" | "created" = "created",
+  agent?: Agent
 ) {
   const textTabs: TextTab[] = [
     { tabLabel: "PropertyAddress", value: fields.PropertyAddress },
@@ -31,8 +33,10 @@ export function buildEnvelopePayload(
   ].filter((t) => t.value && t.value.trim() !== "");
 
   const templateId = process.env.DOCUSIGN_TEMPLATE_ID;
-  const agentName = process.env.AGENT_NAME || "Ian Tudor";
-  const agentEmail = process.env.AGENT_EMAIL || "ian.b.tudor@gmail.com";
+  // Prefer the agent chosen in the app; fall back to env defaults.
+  const agentName = agent?.name || process.env.AGENT_NAME || "Ian Tudor";
+  const agentEmail =
+    agent?.email || process.env.AGENT_EMAIL || "ian.b.tudor@gmail.com";
 
   const subjectAddr = [
     fields.PropertyAddress,
