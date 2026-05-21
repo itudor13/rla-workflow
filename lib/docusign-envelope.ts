@@ -14,7 +14,10 @@ function smartyTabs(fields: ListingFields, index: 0 | 1): TextTab[] {
   ];
 }
 
-export function buildEnvelopePayload(fields: ListingFields) {
+export function buildEnvelopePayload(
+  fields: ListingFields,
+  status: "sent" | "created" = "created"
+) {
   const textTabs: TextTab[] = [
     { tabLabel: "PropertyAddress", value: fields.PropertyAddress },
     { tabLabel: "City", value: fields.City },
@@ -62,7 +65,7 @@ export function buildEnvelopePayload(fields: ListingFields) {
         routingOrder: "2",
       },
     ],
-    status: "sent",
+    status,
     emailSubject: `Listing Agreement - ${subjectAddr}`,
     notification: {
       reminders: {

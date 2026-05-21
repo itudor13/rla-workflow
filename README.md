@@ -7,10 +7,17 @@ Next.js app that lets a real estate agent prefill and send a CAR Residential Lis
 ```
 Agent enters listing details (freeform or form)
   → POST /api/extract       (Claude pulls structured fields from freeform text)
-  → Agent reviews + edits
-  → POST /api/send          (server-side DocuSign envelope creation via JWT Grant)
+  → Agent reviews + edits the field values in the app
+  → POST /api/send          (creates a DRAFT envelope via JWT Grant, returns an
+                             embedded "Review & Send" URL)
+  → Agent reviews the real prefilled document in DocuSign and clicks Send
   → DocuSign emails seller (Seller signs first, Agent counter-signs)
 ```
+
+**Review gate:** the envelope is created as a *draft* and the agent is dropped into
+DocuSign's "Review & Send" screen. Nothing is sent to the seller until the listing
+agent clicks **Send** there. If they back out, the draft sits in their DocuSign
+Drafts and the app says "Saved as draft."
 
 Server-side API routes keep both API keys off the browser and avoid all CORS issues.
 

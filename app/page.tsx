@@ -297,6 +297,30 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<keyof ListingFields | null>(null);
   const [envelopeId, setEnvelopeId] = useState<string | null>(null);
+  const [returnInfo, setReturnInfo] = useState<{
+    event: string;
+    address?: string;
+    email?: string;
+  } | null>(null);
+
+  // Handle the redirect back from DocuSign's "Review & Send" screen.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("ds_return") !== "1") return;
+    const event = (params.get("event") || "").toLowerCase();
+    let stashed: { envelopeId?: string; address?: string; email?: string } = {};
+    try {
+      stashed = JSON.parse(sessionStorage.getItem("rla_last_send") || "{}");
+      sessionStorage.removeItem("rla_last_send");
+    } catch {
+      /* ignore */
+    }
+    setEnvelopeId(stashed.envelopeId || null);
+    setReturnInfo({ event, address: stashed.address, email: stashed.email });
+    setScreen("done");
+    // Clean the URL so a refresh doesn't replay this state.
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
   // Auto-calc end date when start or term changes
   useEffect(() => {
@@ -372,7 +396,7 @@ export default function App() {
       const res = await fetch("/api/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fields }),
+        body: JSON.stringify({ fields, returnUrl: window.location.origin }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -383,11 +407,31 @@ export default function App() {
           "Send failed";
         throw new Error(detail);
       }
+      // Stash the listing summary so we can show a confirmation when DocuSign
+      // redirects back after the agent reviews and sends.
+      try {
+        sessionStorage.setItem(
+          "rla_last_send",
+          JSON.stringify({
+            envelopeId: data.envelopeId,
+            address: fields.PropertyAddress,
+            email: fields.OwnerEmail,
+          })
+        );
+      } catch {
+        /* ignore storage errors */
+      }
+      // Hand the agent off to DocuSign's "Review & Send" screen. Nothing is
+      // sent to the seller until the agent clicks Send there.
+      if (data.senderViewUrl) {
+        window.location.href = data.senderViewUrl;
+        return;
+      }
+      // Fallback: no sender view (shouldn't happen) — just confirm the draft.
       setEnvelopeId(data.envelopeId);
       setScreen("done");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to send envelope.");
-    } finally {
       setLoading(false);
     }
   };
@@ -606,9 +650,10 @@ export default function App() {
               lineHeight: 1.4,
             }}
           >
-            This will send the listing agreement to{" "}
-            <strong>{fields.OwnerEmail || "(no email)"}</strong> for signature via
-            DocuSign. Auto-reminders kick in after 2 days, then daily.
+            Next you'll see the prefilled agreement in DocuSign to review.{" "}
+            <strong>Nothing is sent to {fields.OwnerEmail || "the seller"}</strong>{" "}
+            until you click Send on that review screen. Auto-reminders kick in after
+            2 days, then daily.
           </div>
 
           <button
@@ -616,7 +661,7 @@ export default function App() {
             disabled={loading || !requiredFilled}
             onClick={sendEnvelope}
           >
-            {loading ? "Sending to DocuSign..." : "Send for Signature"}
+            {loading ? "Opening review screen..." : "Review in DocuSign"}
           </button>
           <button
             style={S.secondaryBtn}
@@ -628,46 +673,62 @@ export default function App() {
       )}
 
       {/* ── Screen: Done ── */}
-      {screen === "done" && (
-        <>
-          <div style={S.card}>
-            <div
-              style={{
-                fontSize: 22,
-                fontFamily: "'DM Serif Display', serif",
-                color: "#2C2825",
-                marginBottom: 8,
-              }}
-            >
-              Sent!
-            </div>
-            <div style={{ fontSize: 14, color: "#6B6560", lineHeight: 1.5 }}>
-              The listing agreement for{" "}
-              <strong>{fields.PropertyAddress}</strong> has been emailed to{" "}
-              <strong>{fields.OwnerEmail}</strong>. They'll get an automatic reminder
-              after 2 days, then daily until signed.
-            </div>
-            {envelopeId && (
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "#B0A9A3",
-                  marginTop: 14,
-                  fontFamily: "monospace",
-                }}
-              >
-                Envelope ID: {envelopeId}
+      {screen === "done" &&
+        (() => {
+          const sent = !returnInfo || returnInfo.event === "send";
+          const addr = returnInfo?.address || fields.PropertyAddress;
+          const email = returnInfo?.email || fields.OwnerEmail;
+          return (
+            <>
+              <div style={S.card}>
+                <div
+                  style={{
+                    fontSize: 22,
+                    fontFamily: "'DM Serif Display', serif",
+                    color: "#2C2825",
+                    marginBottom: 8,
+                  }}
+                >
+                  {sent ? "Sent!" : "Saved as draft"}
+                </div>
+                {sent ? (
+                  <div style={{ fontSize: 14, color: "#6B6560", lineHeight: 1.5 }}>
+                    The listing agreement for <strong>{addr}</strong> has been emailed
+                    to <strong>{email}</strong>. They'll get an automatic reminder
+                    after 2 days, then daily until signed.
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 14, color: "#6B6560", lineHeight: 1.5 }}>
+                    You left the review screen without sending, so{" "}
+                    <strong>nothing was sent to the seller</strong>. The prefilled
+                    agreement is saved in your DocuSign Drafts — you can finish and
+                    send it there anytime, or start over here.
+                  </div>
+                )}
+                {envelopeId && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "#B0A9A3",
+                      marginTop: 14,
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    Envelope ID: {envelopeId}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <div style={S.alert("success")}>
-            You'll counter-sign as the agent once the seller has signed.
-          </div>
-          <button style={S.primaryBtn(false)} onClick={reset}>
-            Start New Listing
-          </button>
-        </>
-      )}
+              <div style={S.alert(sent ? "success" : "warning")}>
+                {sent
+                  ? "You'll counter-sign as the agent once the seller has signed."
+                  : "Tip: nothing reaches the seller until you click Send on the DocuSign review screen."}
+              </div>
+              <button style={S.primaryBtn(false)} onClick={reset}>
+                Start New Listing
+              </button>
+            </>
+          );
+        })()}
     </div>
   );
 }
