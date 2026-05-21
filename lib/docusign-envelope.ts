@@ -8,10 +8,10 @@ type TextTab = { tabLabel: string; value: string };
 // causes DocuSign to drop the recipient's entire tab set, leaving a blank doc.
 //
 // The CAR RLA template (7df819db-…) defines these Seller text tabs. The address
-// fields (PropertyAddress/City/State/ZipCode) are repeated on pages 1–3 with the
-// SAME label, so a single value auto-fills every page. There is no template tab
-// for OwnerName1 (the seller name auto-fills from the recipient name via a
-// fullName tab), nor for ListingStartDate / ListingTermDays.
+// fields (PropertyAddress/City/State/ZipCode) are repeated on pages 1–6 with the
+// SAME label, so a single value auto-fills every page. The seller name auto-fills
+// from the recipient name via a fullName tab (no OwnerName1 text tab). There is
+// no template tab for ListingTermDays (we only print the start/end dates).
 export function buildEnvelopePayload(
   fields: ListingFields,
   status: "sent" | "created" = "created",
@@ -26,6 +26,7 @@ export function buildEnvelopePayload(
     { tabLabel: "APN", value: fields.APN },
     { tabLabel: "SellerPhone", value: fields.SellerPhone.replace(/\D/g, "") },
     { tabLabel: "ListPrice", value: fields.ListPrice.replace(/[^\d.]/g, "") },
+    { tabLabel: "ListingStartDate", value: fields.ListingStartDate },
     { tabLabel: "ListingEndDate", value: fields.ListingEndDate },
     { tabLabel: "CommissionBuySide", value: fields.CommissionBuySide },
     { tabLabel: "CommissionSellSide", value: fields.CommissionSellSide },
