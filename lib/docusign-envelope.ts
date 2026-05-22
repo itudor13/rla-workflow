@@ -2,37 +2,61 @@ import type { ListingFields } from "./fields";
 
 type TextTab = { tabLabel: string; value: string };
 
-// IMPORTANT: only send tabLabels that EXACTLY match tabs that exist in the
-// DocuSign template. Sending labels that don't exist (e.g. positionless tabs)
-// causes DocuSign to drop the recipient's entire tab set, leaving a blank doc.
-//
-// The CAR RLA template (7df819db-…) defines these Seller text tabs. The address
-// fields (PropertyAddress/City/State/ZipCode) are repeated on pages 1–6 with the
-// SAME label, so a single value auto-fills every page. The seller name auto-fills
-// from the recipient name via a fullName tab (no OwnerName1 text tab). There is
-// no template tab for ListingTermDays (we only print the start/end dates).
+// The listing details now live on the template's SENDER PRE-FILL fields (not the
+// Seller's), so they render for everyone regardless of signing order — including
+// the agent, who signs first to review. These values are written to the draft's
+// prefill tabs by /api/send after creation. Keys MUST match the template's
+// pre-fill Data Labels exactly. Address fields repeat on several pages under the
+// same label; we set the value on every matching tab.
+export function fullPropertyAddress(fields: ListingFields): string {
+  const cityStateZip = [
+    fields.City,
+    ["CA", fields.ZipCode].filter(Boolean).join(" ").trim(),
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return [fields.PropertyAddress, cityStateZip].filter(Boolean).join(", ");
+}
+
+export function prefillValuesByLabel(
+  fields: ListingFields
+): Record<string, string> {
+  // We include both the combined "FullPropertyAddress" (the agent's template uses
+  // one address field that formats cleanly) AND the granular labels. /api/send
+  // only writes to pre-fill tabs that actually exist on the document, so any
+  // label without a matching tab is harmlessly ignored.
+  const map: Record<string, string> = {
+    FullPropertyAddress: fullPropertyAddress(fields),
+    PropertyAddress: fields.PropertyAddress,
+    City: fields.City,
+    State: "CA",
+    County: fields.County,
+    ZipCode: fields.ZipCode,
+    APN: fields.APN,
+    ListPrice: fields.ListPrice.replace(/[^\d.]/g, ""),
+    ListingStartDate: fields.ListingStartDate,
+    ListingEndDate: fields.ListingEndDate,
+    CommissionBuySide: fields.CommissionBuySide,
+    CommissionSellSide: fields.CommissionSellSide,
+    SpecialTerms: fields.SpecialTerms,
+  };
+  // Drop empties so we don't blank out template defaults.
+  for (const k of Object.keys(map)) {
+    if (!map[k] || String(map[k]).trim() === "") delete map[k];
+  }
+  return map;
+}
+
+// The Seller still owns their phone field, so send it on the Seller role.
 export function buildEnvelopePayload(
   fields: ListingFields,
   status: "sent" | "created" = "created"
 ) {
-  const textTabs: TextTab[] = [
-    { tabLabel: "PropertyAddress", value: fields.PropertyAddress },
-    { tabLabel: "City", value: fields.City },
-    { tabLabel: "State", value: "CA" },
-    { tabLabel: "ZipCode", value: fields.ZipCode },
-    { tabLabel: "County", value: fields.County },
-    { tabLabel: "APN", value: fields.APN },
+  const sellerTextTabs: TextTab[] = [
     { tabLabel: "SellerPhone", value: fields.SellerPhone.replace(/\D/g, "") },
-    { tabLabel: "ListPrice", value: fields.ListPrice.replace(/[^\d.]/g, "") },
-    { tabLabel: "ListingStartDate", value: fields.ListingStartDate },
-    { tabLabel: "ListingEndDate", value: fields.ListingEndDate },
-    { tabLabel: "CommissionBuySide", value: fields.CommissionBuySide },
-    { tabLabel: "CommissionSellSide", value: fields.CommissionSellSide },
-    { tabLabel: "SpecialTerms", value: fields.SpecialTerms },
   ].filter((t) => t.value && t.value.trim() !== "");
 
   const templateId = process.env.DOCUSIGN_TEMPLATE_ID;
-  // Prefer the agent chosen in the app; fall back to env defaults.
   const subjectAddr = [
     fields.PropertyAddress,
     fields.City && `${fields.City}, CA ${fields.ZipCode}`.trim(),
@@ -41,7 +65,7 @@ export function buildEnvelopePayload(
     .join(", ");
 
   // Only fill the Seller role here. The template's Agent recipient is updated
-  // in place after creation (see /api/send) so the chosen agent REPLACES the
+  // in place after creation (see /api/send) so the chosen agent replaces the
   // template's default agent instead of being added as a duplicate.
   return {
     templateId,
@@ -50,7 +74,7 @@ export function buildEnvelopePayload(
         roleName: "Seller",
         name: fields.OwnerName1,
         email: fields.OwnerEmail,
-        tabs: { textTabs },
+        ...(sellerTextTabs.length ? { tabs: { textTabs: sellerTextTabs } } : {}),
       },
     ],
     status,
