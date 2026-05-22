@@ -27,6 +27,11 @@ export function prefillValuesByLabel(
   // label without a matching tab is harmlessly ignored.
   const map: Record<string, string> = {
     FullPropertyAddress: fullPropertyAddress(fields),
+    // Seller name as a sender pre-fill so it shows correctly to everyone
+    // (the template's auto "Full Name" tab renders the wrong person). Supports
+    // either label depending on what the field is named in the template.
+    SellerName: fields.OwnerName1,
+    OwnerName1: fields.OwnerName1,
     PropertyAddress: fields.PropertyAddress,
     City: fields.City,
     State: "CA",
