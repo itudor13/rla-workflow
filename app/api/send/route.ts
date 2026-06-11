@@ -132,6 +132,43 @@ export async function POST(req: Request) {
         "No sender pre-fill fields found on the template — did the fields get reassigned to Sender?";
     }
 
+    // 3b) Self-heal: find any required pre-fill tab that is still empty and
+    //     clear its Required flag on THIS envelope so the send isn't blocked
+    //     by a single missing optional value (e.g. APN, phone). The template
+    //     stays unchanged — this only affects this one envelope.
+    const skippedRequired: string[] = [];
+    try {
+      const afterRes = await fetch(
+        `${acct}/envelopes/${envelopeId}/documents/1/tabs`,
+        { headers: authHeaders }
+      );
+      const afterTabs = await afterRes.json();
+      const afterPrefill: Record<string, unknown>[] =
+        afterTabs.prefillTabs?.textTabs || [];
+      const stillRequiredEmpty = afterPrefill
+        .filter(
+          (t) =>
+            String(t.required).toLowerCase() === "true" &&
+            !String(t.value || "").trim()
+        )
+        .map((t) => ({ ...t, required: "false" }));
+      if (stillRequiredEmpty.length) {
+        await fetch(
+          `${acct}/envelopes/${envelopeId}/documents/1/tabs`,
+          {
+            method: "PUT",
+            headers: authHeaders,
+            body: JSON.stringify({ prefillTabs: { textTabs: stillRequiredEmpty } }),
+          }
+        );
+        for (const t of stillRequiredEmpty) {
+          skippedRequired.push(String(t.tabLabel));
+        }
+      }
+    } catch {
+      /* best-effort; don't block send on reconciliation errors */
+    }
+
     // 4) Send. First stop is the agent's mobile-friendly review-and-sign email.
     const sendRes = await fetch(`${acct}/envelopes/${envelopeId}`, {
       method: "PUT",
@@ -153,6 +190,7 @@ export async function POST(req: Request) {
       agentEmail: agent.email,
       sellerEmail: fields.OwnerEmail,
       prefillWarning,
+      skippedRequired,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
