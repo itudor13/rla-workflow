@@ -26,7 +26,7 @@ export function prefillValuesByLabel(
   // only writes to pre-fill tabs that actually exist on the document, so any
   // label without a matching tab is harmlessly ignored.
   const map: Record<string, string> = {
-    FullPropertyAddress: fullPropertyAddress(fields),
+    FullPropertyAddress: fullPropertyAddress(fields), // pages 2-6 footer (combined)
     // Seller name as a sender pre-fill so it shows correctly to everyone
     // (the template's auto "Full Name" tab renders the wrong person). Supports
     // either label depending on what the field is named in the template.
@@ -44,6 +44,9 @@ export function prefillValuesByLabel(
     CommissionBuySide: fields.CommissionBuySide,
     CommissionSellSide: fields.CommissionSellSide,
     SpecialTerms: fields.SpecialTerms,
+    // Seller contact info on page 7 (now sender pre-fill fields).
+    SellerEmail: fields.OwnerEmail,
+    SellerPhone: fields.SellerPhone.replace(/\D/g, ""),
   };
   // Drop empties so we don't blank out template defaults.
   for (const k of Object.keys(map)) {
@@ -52,15 +55,12 @@ export function prefillValuesByLabel(
   return map;
 }
 
-// The Seller still owns their phone field, so send it on the Seller role.
+// All listing values now flow through Sender pre-fill (see prefillValuesByLabel
+// above) — the Seller role just provides the recipient identity.
 export function buildEnvelopePayload(
   fields: ListingFields,
   status: "sent" | "created" = "created"
 ) {
-  const sellerTextTabs: TextTab[] = [
-    { tabLabel: "SellerPhone", value: fields.SellerPhone.replace(/\D/g, "") },
-  ].filter((t) => t.value && t.value.trim() !== "");
-
   const templateId = process.env.DOCUSIGN_TEMPLATE_ID;
   const subjectAddr = [
     fields.PropertyAddress,
@@ -79,7 +79,6 @@ export function buildEnvelopePayload(
         roleName: "Seller",
         name: fields.OwnerName1,
         email: fields.OwnerEmail,
-        ...(sellerTextTabs.length ? { tabs: { textTabs: sellerTextTabs } } : {}),
       },
     ],
     status,
