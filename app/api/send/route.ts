@@ -143,15 +143,19 @@ export async function POST(req: Request) {
         { headers: authHeaders }
       );
       const afterTabs = await afterRes.json();
-      const afterPrefill: Record<string, unknown>[] =
-        afterTabs.prefillTabs?.textTabs || [];
-      const stillRequiredEmpty = afterPrefill
-        .filter(
-          (t) =>
-            String(t.required).toLowerCase() === "true" &&
-            !String(t.value || "").trim()
-        )
-        .map((t) => ({ ...t, required: "false" }));
+      const afterPrefill = (afterTabs.prefillTabs?.textTabs || []) as Array<
+        Record<string, unknown>
+      >;
+      const stillRequiredEmpty: Array<Record<string, unknown>> = [];
+      for (const t of afterPrefill) {
+        const required = String(t["required"] ?? "").toLowerCase() === "true";
+        const value = String(t["value"] ?? "").trim();
+        if (required && !value) {
+          stillRequiredEmpty.push({ ...t, required: "false" });
+          const label = t["tabLabel"];
+          skippedRequired.push(typeof label === "string" ? label : "");
+        }
+      }
       if (stillRequiredEmpty.length) {
         await fetch(
           `${acct}/envelopes/${envelopeId}/documents/1/tabs`,
@@ -161,9 +165,6 @@ export async function POST(req: Request) {
             body: JSON.stringify({ prefillTabs: { textTabs: stillRequiredEmpty } }),
           }
         );
-        for (const t of stillRequiredEmpty) {
-          skippedRequired.push(String(t.tabLabel));
-        }
       }
     } catch {
       /* best-effort; don't block send on reconciliation errors */
